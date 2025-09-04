@@ -1,39 +1,47 @@
+// server.js
 const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
 const crypto = require('crypto');
-
 const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
 app.use(cors());
 app.use(bodyParser.json());
 
-// Replace with your Supabase credentials
+// Supabase setup
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_ANON_KEY;
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-// Health check
+// Basic root route
 app.get('/', (req, res) => {
   res.send('Backend is running!');
 });
 
-// Upload article
+// Upload article and generate SHA-256
 app.post('/upload-article', async (req, res) => {
   const { title, content } = req.body;
-  const hash = crypto.createHash('sha256').update(content).digest('hex');
+  if (!title || !content) return res.status(400).json({ error: 'Title and content are required.' });
 
-  const { data, error } = await supabase
-    .from('articles')
-    .insert([{ title, content, sha256: hash }]);
+  // Generate SHA-256 hash
+  const hash = crypto.createHash('sha256').update(title + content + Date.now()).digest('hex');
 
-  if (error) return res.status(500).json({ error: error.message });
+  try {
+    const { data, error } = await supabase
+      .from('articles')
+      .insert([{ title, content, sha256: hash }])
+      .select();
 
-  res.json({ hash });
+    if (error) return res.status(500).json({ error: error.message });
+
+    res.json({ success: true, hash });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// Add a comment to an article
+// Add a comment and calculate points
 app.post('/add-comment', async (req, res) => {
   const { article_id, commenter_name, comment, citations_count, has_identifying_info } = req.body;
 
@@ -47,6 +55,9 @@ app.post('/add-comment', async (req, res) => {
   points += (citations_count || 0) * 2; // 2 points per citation
   if (has_identifying_info) points += 5; // bonus for identifying info
 
+  // Round to 2 decimals and ensure numeric
+  points = Number(points.toFixed(2));
+
   try {
     // Insert comment
     const { data, error } = await supabase
@@ -57,12 +68,13 @@ app.post('/add-comment', async (req, res) => {
         comment,
         citations_count: citations_count || 0,
         points
-      }]);
+      }])
+      .select();
 
     if (error) return res.status(500).json({ error: error.message });
 
     // Update article points (sum of all comment points)
-    const { data: articleData, error: articleError } = await supabase
+    const { error: articleError } = await supabase
       .from('articles')
       .update({
         points: supabase.raw('points + ?', [points])
@@ -77,7 +89,8 @@ app.post('/add-comment', async (req, res) => {
   }
 });
 
-
 // Start server
-const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
