@@ -19,6 +19,22 @@ app.get('/', (req, res) => {
   res.send('Backend is running!');
 });
 
+// Get all articles
+app.get('/articles', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('articles')
+      .select('*')
+      .order('id', { ascending: true });
+
+    if (error) return res.status(500).json({ error: error.message });
+
+    res.json({ articles: data });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Get single article by id
 app.get('/article/:id', async (req, res) => {
   const { id } = req.params;
