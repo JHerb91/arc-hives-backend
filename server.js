@@ -3,6 +3,8 @@ const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
 const crypto = require('crypto');
+const PDFDocument = require('pdfkit');
+const { v4: uuidv4 } = require('uuid');
 const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
@@ -28,7 +30,6 @@ app.get('/articles', async (req, res) => {
       .order('id', { ascending: true });
 
     if (error) return res.status(500).json({ error: error.message });
-
     res.json({ articles: data });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -47,7 +48,6 @@ app.get('/article/:id', async (req, res) => {
       .single();
 
     if (error) return res.status(500).json({ error: error.message });
-
     res.json({ article: data });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -66,7 +66,6 @@ app.get('/comments/:article_id', async (req, res) => {
       .order('created_at', { ascending: true });
 
     if (error) return res.status(500).json({ error: error.message });
-
     res.json({ comments: data });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -87,7 +86,6 @@ app.post('/upload-article', async (req, res) => {
       .select();
 
     if (error) return res.status(500).json({ error: error.message });
-
     res.json({ success: true, hash });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -146,7 +144,7 @@ app.post('/add-comment', async (req, res) => {
   }
 });
 
-// Verify article ownership by SHA-256
+// Verify article ownership by SHA-256 (JSON)
 app.post('/verify-article', async (req, res) => {
   const { sha256 } = req.body;
   if (!sha256) return res.status(400).json({ error: 'SHA-256 hash is required.' });
@@ -163,12 +161,80 @@ app.post('/verify-article', async (req, res) => {
     const certificate = {
       title: data.title,
       article_id: data.id,
-      sha256: data.sha256,
+      certificate_id: data.certificate_id || null,
       verified_at: new Date().toISOString(),
       message: 'This certificate verifies that you are the original publisher of this article.'
     };
 
     res.json({ success: true, certificate });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Verify article ownership and generate PDF certificate
+app.post('/verify-article-pdf', async (req, res) => {
+  const { sha256 } = req.body;
+  if (!sha256) return res.status(400).json({ error: 'SHA-256 hash is required.' });
+
+  try {
+    // Fetch the article
+    let { data: article, error } = await supabase
+      .from('articles')
+      .select('*')
+      .eq('sha256', sha256)
+      .single();
+
+    if (error || !article) return res.status(404).json({ error: 'No article found with this SHA-256.' });
+
+    // Generate a certificate ID if not exists
+    if (!article.certificate_id) {
+      const certId = uuidv4();
+      await supabase
+        .from('articles')
+        .update({ certificate_id: certId })
+        .eq('id', article.id);
+      article.certificate_id = certId;
+    }
+
+    const certificate = {
+      title: article.title,
+      article_id: article.id,
+      certificate_id: article.certificate_id,
+      verified_at: new Date().toISOString(),
+      message: 'This certificate verifies that you are the original publisher of this article.'
+    };
+
+    // Generate PDF
+    const doc = new PDFDocument({ size: 'A4', margin: 50 });
+    let buffers = [];
+    doc.on('data', buffers.push.bind(buffers));
+    doc.on('end', () => {
+      const pdfData = Buffer.concat(buffers);
+      res.set({
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `attachment; filename=certificate_${article.id}.pdf`,
+        'Content-Length': pdfData.length
+      });
+      res.send(pdfData);
+    });
+
+    doc.fontSize(24).text('Certificate of Authorship', { align: 'center' });
+    doc.moveDown(2);
+    doc.fontSize(18).text(`Article Title: ${certificate.title}`, { align: 'center' });
+    doc.moveDown(1);
+    doc.fontSize(14).text(`Article ID: ${certificate.article_id}`, { align: 'center' });
+    doc.moveDown(1);
+    doc.text(`Certificate ID: ${certificate.certificate_id}`, { align: 'center' });
+    doc.moveDown(1);
+    doc.text(`Verified At: ${certificate.verified_at}`, { align: 'center' });
+    doc.moveDown(2);
+    doc.fontSize(16).text(certificate.message, { align: 'center' });
+    doc.moveDown(3);
+    doc.fontSize(12).text('--- End of Certificate ---', { align: 'center', opacity: 0.5 });
+
+    doc.end();
+
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
