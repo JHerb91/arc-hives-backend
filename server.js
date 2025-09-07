@@ -138,6 +138,41 @@ app.post('/add-comment', async (req, res) => {
   }
 });
 
+// Verify article ownership by SHA-256
+app.post('/verify-article', async (req, res) => {
+  const { sha256 } = req.body;
+
+  if (!sha256) {
+    return res.status(400).json({ error: 'SHA-256 hash is required.' });
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('articles')
+      .select('*')
+      .eq('sha256', sha256)
+      .single();
+
+    if (error || !data) {
+      return res.status(404).json({ error: 'No article found with this SHA-256.' });
+    }
+
+    // Generate a simple certificate
+    const certificate = {
+      title: data.title,
+      article_id: data.id,
+      sha256: data.sha256,
+      verified_at: new Date().toISOString(),
+      message: 'This certificate verifies that you are the original publisher of this article.'
+    };
+
+    res.json({ success: true, certificate });
+  } catch (err) {
+    console.error('Server error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Start server
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
