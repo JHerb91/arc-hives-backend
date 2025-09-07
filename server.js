@@ -30,14 +30,29 @@ app.get('/article/:id', async (req, res) => {
       .eq('id', id)
       .single();
 
-    if (error) {
-      console.error('Error fetching article:', error);
-      return res.status(500).json({ error: error.message });
-    }
+    if (error) return res.status(500).json({ error: error.message });
 
     res.json({ article: data });
   } catch (err) {
-    console.error('Server error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get comments for a specific article
+app.get('/comments/:article_id', async (req, res) => {
+  const { article_id } = req.params;
+
+  try {
+    const { data, error } = await supabase
+      .from('comments')
+      .select('*')
+      .eq('article_id', article_id)
+      .order('created_at', { ascending: true });
+
+    if (error) return res.status(500).json({ error: error.message });
+
+    res.json({ comments: data });
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
@@ -45,9 +60,7 @@ app.get('/article/:id', async (req, res) => {
 // Upload article and generate SHA-256
 app.post('/upload-article', async (req, res) => {
   const { title, content } = req.body;
-  if (!title || !content) {
-    return res.status(400).json({ error: 'Title and content are required.' });
-  }
+  if (!title || !content) return res.status(400).json({ error: 'Title and content are required.' });
 
   const hash = crypto.createHash('sha256').update(title + content + Date.now()).digest('hex');
 
@@ -57,14 +70,10 @@ app.post('/upload-article', async (req, res) => {
       .insert([{ title, content, sha256: hash }])
       .select();
 
-    if (error) {
-      console.error('Supabase insert error:', error);
-      return res.status(500).json({ error: error.message });
-    }
+    if (error) return res.status(500).json({ error: error.message });
 
     res.json({ success: true, hash });
   } catch (err) {
-    console.error('Server error:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -73,21 +82,14 @@ app.post('/upload-article', async (req, res) => {
 app.post('/add-comment', async (req, res) => {
   const { article_id, commenter_name, comment, citations_count, has_identifying_info } = req.body;
 
-  console.log('Request body:', req.body);
-
-  if (!article_id || !comment) {
-    console.log('Missing article_id or comment');
-    return res.status(400).json({ error: 'Article ID and comment are required.' });
-  }
+  if (!article_id || !comment) return res.status(400).json({ error: 'Article ID and comment are required.' });
 
   // Calculate points
   let points = 0;
-  points += comment.length / 100; // 1 point per 100 characters
+  points += comment.length / 100; // 1 point per 100 chars
   points += (citations_count || 0) * 2; // 2 points per citation
   if (has_identifying_info) points += 5;
   points = Number(points.toFixed(2));
-
-  console.log('Calculated points:', points);
 
   try {
     // Insert comment
@@ -102,22 +104,16 @@ app.post('/add-comment', async (req, res) => {
       }])
       .select();
 
-    if (commentError) {
-      console.error('Supabase insert error:', commentError);
-      return res.status(500).json({ error: commentError.message });
-    }
+    if (commentError) return res.status(500).json({ error: commentError.message });
 
-    // Update article points safely
+    // Update article points
     const { data: articleData, error: fetchError } = await supabase
       .from('articles')
       .select('points')
       .eq('id', article_id)
       .single();
 
-    if (fetchError) {
-      console.error('Error fetching article:', fetchError);
-      return res.status(500).json({ error: fetchError.message });
-    }
+    if (fetchError) return res.status(500).json({ error: fetchError.message });
 
     const newPoints = Number(articleData.points || 0) + points;
 
@@ -126,14 +122,10 @@ app.post('/add-comment', async (req, res) => {
       .update({ points: newPoints })
       .eq('id', article_id);
 
-    if (updateError) {
-      console.error('Error updating article points:', updateError);
-      return res.status(500).json({ error: updateError.message });
-    }
+    if (updateError) return res.status(500).json({ error: updateError.message });
 
     res.json({ success: true, points, comment: commentData[0] });
   } catch (err) {
-    console.error('Server error:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -141,10 +133,7 @@ app.post('/add-comment', async (req, res) => {
 // Verify article ownership by SHA-256
 app.post('/verify-article', async (req, res) => {
   const { sha256 } = req.body;
-
-  if (!sha256) {
-    return res.status(400).json({ error: 'SHA-256 hash is required.' });
-  }
+  if (!sha256) return res.status(400).json({ error: 'SHA-256 hash is required.' });
 
   try {
     const { data, error } = await supabase
@@ -153,11 +142,8 @@ app.post('/verify-article', async (req, res) => {
       .eq('sha256', sha256)
       .single();
 
-    if (error || !data) {
-      return res.status(404).json({ error: 'No article found with this SHA-256.' });
-    }
+    if (error || !data) return res.status(404).json({ error: 'No article found with this SHA-256.' });
 
-    // Generate a simple certificate
     const certificate = {
       title: data.title,
       article_id: data.id,
@@ -168,7 +154,6 @@ app.post('/verify-article', async (req, res) => {
 
     res.json({ success: true, certificate });
   } catch (err) {
-    console.error('Server error:', err);
     res.status(500).json({ error: err.message });
   }
 });
