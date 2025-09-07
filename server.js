@@ -45,21 +45,22 @@ app.post('/upload-article', async (req, res) => {
 app.post('/add-comment', async (req, res) => {
   const { article_id, commenter_name, comment, citations_count, has_identifying_info } = req.body;
 
+  console.log('Request body:', req.body); // <-- log incoming request
+
   if (!article_id || !comment) {
+    console.log('Missing article_id or comment');
     return res.status(400).json({ error: 'Article ID and comment are required.' });
   }
 
-  // Calculate points
   let points = 0;
-  points += comment.length / 100; // 1 point per 100 characters
-  points += (citations_count || 0) * 2; // 2 points per citation
-  if (has_identifying_info) points += 5; // bonus for identifying info
-
-  // Round to 2 decimals and ensure numeric
+  points += comment.length / 100;
+  points += (citations_count || 0) * 2;
+  if (has_identifying_info) points += 5;
   points = Number(points.toFixed(2));
 
   try {
-    // Insert comment
+    console.log('Calculated points:', points); // <-- log points
+
     const { data, error } = await supabase
       .from('comments')
       .insert([{
@@ -71,9 +72,11 @@ app.post('/add-comment', async (req, res) => {
       }])
       .select();
 
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) {
+      console.log('Supabase insert error:', error);
+      return res.status(500).json({ error: error.message });
+    }
 
-    // Update article points (sum of all comment points)
     const { error: articleError } = await supabase
       .from('articles')
       .update({
@@ -81,16 +84,14 @@ app.post('/add-comment', async (req, res) => {
       })
       .eq('id', article_id);
 
-    if (articleError) return res.status(500).json({ error: articleError.message });
+    if (articleError) {
+      console.log('Supabase article update error:', articleError);
+      return res.status(500).json({ error: articleError.message });
+    }
 
     res.json({ success: true, points, comment: data[0] });
   } catch (err) {
+    console.log('Server error:', err);
     res.status(500).json({ error: err.message });
   }
-});
-
-// Start server
-const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
 });
