@@ -19,6 +19,29 @@ app.get('/', (req, res) => {
   res.send('Backend is running!');
 });
 
+// Get single article by id
+app.get('/article/:id', async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const { data, error } = await supabase
+      .from('articles')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (error) {
+      console.error('Error fetching article:', error);
+      return res.status(500).json({ error: error.message });
+    }
+
+    res.json({ article: data });
+  } catch (err) {
+    console.error('Server error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Upload article and generate SHA-256
 app.post('/upload-article', async (req, res) => {
   const { title, content } = req.body;
@@ -68,7 +91,7 @@ app.post('/add-comment', async (req, res) => {
 
   try {
     // Insert comment
-    const { data, error } = await supabase
+    const { data: commentData, error: commentError } = await supabase
       .from('comments')
       .insert([{
         article_id,
@@ -79,44 +102,36 @@ app.post('/add-comment', async (req, res) => {
       }])
       .select();
 
-    if (error) {
-      console.error('Supabase insert error:', error);
-      return res.status(500).json({ error: error.message });
+    if (commentError) {
+      console.error('Supabase insert error:', commentError);
+      return res.status(500).json({ error: commentError.message });
     }
 
-    // Update article points (add new points)
-    // New - safe for numeric column
-const { data: articleData, error: articleError } = await supabase
-.from('articles')
-.select('points')
-.eq('id', article_id)
-.single();
+    // Update article points safely
+    const { data: articleData, error: fetchError } = await supabase
+      .from('articles')
+      .select('points')
+      .eq('id', article_id)
+      .single();
 
-if (articleError) {
-console.error('Error fetching article:', articleError);
-return res.status(500).json({ error: articleError.message });
-}
-
-// Add points safely
-const newPoints = Number(articleData.points || 0) + points;
-
-const { error: updateError } = await supabase
-.from('articles')
-.update({ points: newPoints })
-.eq('id', article_id);
-
-if (updateError) {
-console.error('Error updating article points:', updateError);
-return res.status(500).json({ error: updateError.message });
-}
-
-
-    if (articleError) {
-      console.error('Supabase article update error:', articleError);
-      return res.status(500).json({ error: articleError.message });
+    if (fetchError) {
+      console.error('Error fetching article:', fetchError);
+      return res.status(500).json({ error: fetchError.message });
     }
 
-    res.json({ success: true, points, comment: data[0] });
+    const newPoints = Number(articleData.points || 0) + points;
+
+    const { error: updateError } = await supabase
+      .from('articles')
+      .update({ points: newPoints })
+      .eq('id', article_id);
+
+    if (updateError) {
+      console.error('Error updating article points:', updateError);
+      return res.status(500).json({ error: updateError.message });
+    }
+
+    res.json({ success: true, points, comment: commentData[0] });
   } catch (err) {
     console.error('Server error:', err);
     res.status(500).json({ error: err.message });
