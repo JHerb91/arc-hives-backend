@@ -85,10 +85,31 @@ app.post('/add-comment', async (req, res) => {
     }
 
     // Update article points (add new points)
-    const { error: articleError } = await supabase
-      .from('articles')
-      .update({ points: supabase.sql`${points} + points` }) // use SQL template
-      .eq('id', article_id);
+    // New - safe for numeric column
+const { data: articleData, error: articleError } = await supabase
+.from('articles')
+.select('points')
+.eq('id', article_id)
+.single();
+
+if (articleError) {
+console.error('Error fetching article:', articleError);
+return res.status(500).json({ error: articleError.message });
+}
+
+// Add points safely
+const newPoints = Number(articleData.points || 0) + points;
+
+const { error: updateError } = await supabase
+.from('articles')
+.update({ points: newPoints })
+.eq('id', article_id);
+
+if (updateError) {
+console.error('Error updating article points:', updateError);
+return res.status(500).json({ error: updateError.message });
+}
+
 
     if (articleError) {
       console.error('Supabase article update error:', articleError);
