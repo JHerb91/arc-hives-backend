@@ -24,11 +24,19 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 
 // ===== Upload Article =====
 app.post('/upload', async (req, res) => {
+  console.log('--- /upload called ---');
+  console.log('Request body:', req.body);
+
   const { title, sha256 } = req.body;
-  console.log('Upload request body:', req.body); // Add this line
+  if (!title || !sha256) {
+    console.error('Missing title or sha256');
+    return res.status(400).json({ error: 'Title and SHA-256 hash are required.' });
+  }
+
   try {
     const { data, error } = await supabase.from('articles').insert([{ title, sha256 }]);
     if (error) throw error;
+    console.log('Insert successful:', data[0]);
     res.json({ success: true, article: data[0] });
   } catch (err) {
     console.error('Supabase insert error:', err);
