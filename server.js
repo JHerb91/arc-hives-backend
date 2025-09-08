@@ -29,13 +29,23 @@ app.post('/upload', async (req, res) => {
 
   const { title, sha256 } = req.body;
   if (!title || !sha256) {
-    console.error('Missing title or sha256');
     return res.status(400).json({ error: 'Title and SHA-256 hash are required.' });
   }
 
   try {
+    // Try inserting
     const { data, error } = await supabase.from('articles').insert([{ title, sha256 }]);
-    if (error) throw error;
+
+    if (error) {
+      // Check if it's a duplicate key error
+      if (error.code === '23505') {
+        const { data: existing } = await supabase.from('articles').select('*').eq('sha256', sha256).limit(1);
+        console.log('Duplicate detected, returning existing article:', existing[0]);
+        return res.json({ success: true, article: existing[0], duplicate: true });
+      }
+      throw error;
+    }
+
     console.log('Insert successful:', data[0]);
     res.json({ success: true, article: data[0] });
   } catch (err) {
@@ -43,7 +53,6 @@ app.post('/upload', async (req, res) => {
     res.status(500).json({ error: 'Error uploading article.' });
   }
 });
-
 // ===== Verify Article =====
 app.post('/verify-article', async (req, res) => {
   const { sha256 } = req.body;
