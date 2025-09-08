@@ -24,35 +24,44 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 
 // ===== Upload Article =====
 app.post('/upload', async (req, res) => {
-  console.log('--- /upload called ---');
-  console.log('Request body:', req.body);
-
   const { title, sha256 } = req.body;
-  if (!title || !sha256) {
-    return res.status(400).json({ error: 'Title and SHA-256 hash are required.' });
-  }
+  console.log('Upload request body:', req.body);
 
   try {
-    // Try inserting
-    const { data, error } = await supabase.from('articles').insert([{ title, sha256 }]);
+    // Try inserting the article
+    const { data, error } = await supabase
+      .from('articles')
+      .insert([{ title, sha256 }])
+      .select(); // return the inserted row
 
     if (error) {
-      // Check if it's a duplicate key error
+      // If duplicate, return existing row instead of throwing
       if (error.code === '23505') {
-        const { data: existing } = await supabase.from('articles').select('*').eq('sha256', sha256).limit(1);
-        console.log('Duplicate detected, returning existing article:', existing[0]);
-        return res.json({ success: true, article: existing[0], duplicate: true });
+        const { data: existing } = await supabase
+          .from('articles')
+          .select('*')
+          .eq('sha256', sha256)
+          .single();
+
+        return res.json({
+          success: true,
+          duplicate: true,
+          article: existing
+        });
       }
-      throw error;
+      // Other errors
+      console.error('Supabase insert error:', error);
+      return res.status(500).json({ error: 'Error uploading article.' });
     }
 
-    console.log('Insert successful:', data[0]);
+    // Success
     res.json({ success: true, article: data[0] });
   } catch (err) {
-    console.error('Supabase insert error:', err);
-    res.status(500).json({ error: 'Error uploading article.' });
+    console.error('Upload exception:', err);
+    res.status(500).json({ error: 'Unexpected server error.' });
   }
 });
+
 // ===== Verify Article =====
 app.post('/verify-article', async (req, res) => {
   const { sha256 } = req.body;
