@@ -25,12 +25,13 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 // ===== Upload Article =====
 app.post('/upload', async (req, res) => {
   const { title, sha256 } = req.body;
+  console.log('Upload request body:', req.body); // Add this line
   try {
     const { data, error } = await supabase.from('articles').insert([{ title, sha256 }]);
     if (error) throw error;
     res.json({ success: true, article: data[0] });
   } catch (err) {
-    console.error(err);
+    console.error('Supabase insert error:', err);
     res.status(500).json({ error: 'Error uploading article.' });
   }
 });
