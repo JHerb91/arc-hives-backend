@@ -12,7 +12,7 @@ const port = process.env.PORT || 10000;
 app.use(cors());
 app.use(bodyParser.json());
 
-// Initialize Supabase
+// ===== Supabase Client =====
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_KEY;
 
@@ -35,7 +35,7 @@ app.post('/upload', async (req, res) => {
   }
 });
 
-// ===== Verify Article (basic) =====
+// ===== Verify Article =====
 app.post('/verify-article', async (req, res) => {
   const { sha256 } = req.body;
   try {
@@ -68,7 +68,7 @@ app.post('/comment', async (req, res) => {
   const { article_id, comment, citations_count, has_identifying_info } = req.body;
 
   try {
-    const points = citations_count * 2 + (comment.length / 50) + (has_identifying_info ? 1 : 0);
+    const points = citations_count * 2 + comment.length / 50 + (has_identifying_info ? 1 : 0);
 
     const { data, error } = await supabase.from('comments').insert([{
       article_id,
@@ -144,5 +144,5 @@ app.post('/verify-article-pdf', async (req, res) => {
 
 // ===== Start Server =====
 app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
+  console.log(`Backend is running on port ${port}`);
 });
