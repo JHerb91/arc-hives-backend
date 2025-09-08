@@ -1,18 +1,14 @@
-// server.js
 import express from 'express';
 import cors from 'cors';
 import bodyParser from 'body-parser';
 import { createClient } from '@supabase/supabase-js';
-import PDFDocument from 'pdfkit';
-import { v4 as uuidv4 } from 'uuid';
+import crypto from 'crypto';
 
 const app = express();
-const port = process.env.PORT || 10000;
-
 app.use(cors());
 app.use(bodyParser.json());
 
-// ===== Supabase Client =====
+// --- Supabase setup ---
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_KEY;
 
@@ -23,143 +19,79 @@ if (!supabaseUrl || !supabaseKey) {
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 // ===== Upload Article =====
-// ===== Upload Article =====
 app.post('/upload', async (req, res) => {
-  const { title, content, sha256 } = req.body;
-
-  if (!title || !content || !sha256) {
-    return res.status(400).json({ error: 'Title, content, and SHA-256 hash are required.' });
+  const { title, content } = req.body;
+  if (!title || !content) {
+    return res.status(400).json({ success: false, message: 'Title and content required.' });
   }
 
+  // Generate SHA-256 hash of content
+  const sha256 = crypto.createHash('sha256').update(content).digest('hex');
+
+  console.log('Upload request body:', { title, content, sha256 });
+
   try {
-    // Attempt to insert new article
-    const { data, error } = await supabase.from('articles').insert([{ title, content, sha256 }]);
+    const { data, error } = await supabase
+      .from('articles')
+      .insert([{ title, content, sha256 }])
+      .select(); // ensures data is returned
 
     if (error) {
-      // Handle duplicate SHA-256
+      // handle duplicate
       if (error.code === '23505') {
         return res.json({ success: false, duplicate: true });
       }
       throw error;
     }
 
-    // Success
-    res.json({ success: true, article: data[0] });
-  } catch (err) {
-    console.error('Supabase insert error:', err);
-    res.status(500).json({ error: 'Error uploading article.' });
-  }
-});
-
-
-// ===== Verify Article =====
-app.post('/verify-article', async (req, res) => {
-  const { sha256 } = req.body;
-  try {
-    const { data, error } = await supabase
-      .from('articles')
-      .select('*')
-      .eq('sha256', sha256)
-      .single();
-
-    if (error || !data) {
-      return res.status(404).json({ error: 'Article not found.' });
+    if (!data || !data[0]) {
+      return res.json({ success: false, message: 'No data returned from Supabase.' });
     }
 
-    res.json({
-      success: true,
-      certificate: {
-        title: data.title,
-        article_id: data.id,
-        message: 'This certificate verifies that you are the original publisher of this article.',
-      },
-    });
+    res.json({ success: true, hash: sha256, article: data[0] });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Error verifying article.' });
+    console.error('Supabase insert error:', err);
+    res.status(500).json({ success: false, error: 'Error uploading article.' });
   }
 });
 
-// ===== Submit Comment =====
+// ===== Comments =====
 app.post('/comment', async (req, res) => {
-  const { article_id, comment, citations_count, has_identifying_info } = req.body;
+  const { article_id, comment, citations_count = 0, has_identifying_info = false } = req.body;
+
+  if (!article_id || !comment) {
+    return res.status(400).json({ success: false, message: 'Article ID and comment required.' });
+  }
+
+  const points = comment.length / 10 + citations_count + (has_identifying_info ? 2 : 0);
 
   try {
-    const points = citations_count * 2 + comment.length / 50 + (has_identifying_info ? 1 : 0);
-
-    const { data, error } = await supabase.from('comments').insert([{
-      article_id,
-      comment,
-      citations_count,
-      points,
-      commenter_name: 'Anonymous',
-    }]);
+    const { data, error } = await supabase
+      .from('comments')
+      .insert([{ article_id, comment, citations_count, has_identifying_info, points }])
+      .select();
 
     if (error) throw error;
-
     res.json({ success: true, points, comment: data[0] });
   } catch (err) {
     console.error('Supabase insert error:', err);
-    res.status(500).json({ error: 'Error submitting comment.' });
+    res.status(500).json({ success: false, error: 'Error saving comment.' });
   }
 });
 
-// ===== PDF Certificate Generation =====
-app.post('/verify-article-pdf', async (req, res) => {
-  const { sha256 } = req.body;
-
+// ===== Get Articles =====
+app.get('/articles', async (req, res) => {
   try {
-    const { data: articleData, error } = await supabase
-      .from('articles')
-      .select('*')
-      .eq('sha256', sha256)
-      .single();
-
-    if (error || !articleData) {
-      return res.status(404).json({ error: 'Article not found for this SHA-256.' });
-    }
-
-    // Generate certificate ID if not exists
-    let certificateId = articleData.certificate_id;
-    if (!certificateId) {
-      certificateId = uuidv4();
-      await supabase
-        .from('articles')
-        .update({ certificate_id: certificateId })
-        .eq('id', articleData.id);
-    }
-
-    // Create PDF
-    const doc = new PDFDocument();
-    let buffers = [];
-    doc.on('data', buffers.push.bind(buffers));
-    doc.on('end', () => {
-      const pdfData = Buffer.concat(buffers);
-      res
-        .writeHead(200, {
-          'Content-Type': 'application/pdf',
-          'Content-Disposition': `attachment; filename=certificate_${articleData.id}.pdf`,
-        })
-        .end(pdfData);
-    });
-
-    doc.fontSize(20).text('Article Certificate', { align: 'center' });
-    doc.moveDown();
-    doc.fontSize(14).text(`Article Title: ${articleData.title}`);
-    doc.text(`Article ID: ${articleData.id}`);
-    doc.text(`Certificate ID: ${certificateId}`);
-    doc.text(`Verified At: ${new Date().toISOString()}`);
-    doc.moveDown();
-    doc.text('This certificate verifies that you are the original publisher of this article.');
-    doc.end();
-
+    const { data, error } = await supabase.from('articles').select('*');
+    if (error) throw error;
+    res.json({ success: true, articles: data });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Error generating PDF certificate.' });
+    res.status(500).json({ success: false, error: 'Error fetching articles.' });
   }
 });
 
-// ===== Start Server =====
-app.listen(port, () => {
-  console.log(`Backend is running on port ${port}`);
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 });
