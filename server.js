@@ -54,6 +54,59 @@ app.post('/upload', async (req, res) => {
     res.status(500).json({ success: false, error: 'Error uploading article.' });
   }
 });
+// ===== Fetch Single Article =====
+app.get('/article', async (req, res) => {
+  try {
+    const { id } = req.query;
+
+    if (!id) {
+      return res.status(400).json({ error: 'Missing id parameter' });
+    }
+
+    const { data, error } = await supabase
+      .from('articles')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (error) {
+      console.error('Supabase fetch error:', error);
+      return res.status(500).json({ error: 'Failed to fetch article' });
+    }
+
+    if (!data) {
+      return res.status(404).json({ error: 'Article not found' });
+    }
+
+    res.json(data);
+  } catch (err) {
+    console.error('Server error fetching article:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ===== Fetch Article Comments =====
+app.get('/articles/:id/comments', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const { data, error } = await supabase
+      .from('comments')
+      .select('*')
+      .eq('article_id', id)
+      .order('created_at', { ascending: true });
+
+    if (error) {
+      console.error('Supabase fetch comments error:', error);
+      return res.status(500).json({ error: 'Failed to fetch comments' });
+    }
+
+    res.json(data || []);
+  } catch (err) {
+    console.error('Server error fetching comments:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
 
 // ===== Comments =====
 app.post('/comment', async (req, res) => {
