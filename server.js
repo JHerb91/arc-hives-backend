@@ -23,6 +23,7 @@ if (!supabaseUrl || !supabaseKey) {
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 // ===== Upload Article =====
+// ===== Upload Article =====
 app.post('/upload', async (req, res) => {
   const { title, content, sha256 } = req.body;
 
@@ -30,23 +31,20 @@ app.post('/upload', async (req, res) => {
     return res.status(400).json({ error: 'Title, content, and SHA-256 hash are required.' });
   }
 
-  console.log('Upload request body:', req.body);
-
   try {
-    // Insert into Supabase
-    const { data, error } = await supabase
-      .from('articles')
-      .insert([{ title, content, sha256 }]);
+    // Attempt to insert new article
+    const { data, error } = await supabase.from('articles').insert([{ title, content, sha256 }]);
 
     if (error) {
       // Handle duplicate SHA-256
       if (error.code === '23505') {
-        return res.json({ duplicate: true });
+        return res.json({ success: false, duplicate: true });
       }
       throw error;
     }
 
-    res.json({ success: true, article: data[0], hash: sha256 });
+    // Success
+    res.json({ success: true, article: data[0] });
   } catch (err) {
     console.error('Supabase insert error:', err);
     res.status(500).json({ error: 'Error uploading article.' });
