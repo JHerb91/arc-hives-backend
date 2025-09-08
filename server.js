@@ -28,25 +28,19 @@ app.post('/upload', async (req, res) => {
   console.log('Upload request body:', req.body);
 
   try {
-    // Try inserting the article
     const { data, error } = await supabase
       .from('articles')
       .insert([{ title, sha256 }])
       .select(); // return the inserted row
 
     if (error) {
-      // If duplicate, return existing row instead of throwing
+      // Handle duplicate
       if (error.code === '23505') {
-        const { data: existing } = await supabase
-          .from('articles')
-          .select('*')
-          .eq('sha256', sha256)
-          .single();
-
+        // Only indicate success, no hash returned
         return res.json({
           success: true,
           duplicate: true,
-          article: existing
+          message: 'Article already exists.'
         });
       }
       // Other errors
@@ -54,13 +48,14 @@ app.post('/upload', async (req, res) => {
       return res.status(500).json({ error: 'Error uploading article.' });
     }
 
-    // Success
-    res.json({ success: true, article: data[0] });
+    // Success — return the hash for the new article only
+    res.json({ success: true, article: data[0], hash: data[0].sha256 });
   } catch (err) {
     console.error('Upload exception:', err);
     res.status(500).json({ error: 'Unexpected server error.' });
   }
 });
+
 
 // ===== Verify Article =====
 app.post('/verify-article', async (req, res) => {
