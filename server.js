@@ -4,8 +4,8 @@ import bodyParser from 'body-parser';
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 import multer from 'multer';
-const upload = multer({ storage: multer.memoryStorage() }); // keep files in memory
 
+const upload = multer({ storage: multer.memoryStorage() }); // keep files in memory
 
 const app = express();
 app.use(cors());
@@ -25,29 +25,34 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 app.post('/upload', upload.single('file'), async (req, res) => {
   try {
     const { title, authors, original_link, bibliography } = req.body;
+    const file = req.file;
 
-    if (!req.file) {
-      return res.status(400).json({ error: 'File is required' });
+    if (!title || !file) {
+      return res.status(400).json({ error: 'Title and file are required' });
     }
 
-    // Upload file buffer to Supabase storage (bucket = "articles")
-    const filePath = `articles/${Date.now()}_${req.file.originalname}`;
+    // Generate SHA-256 hash of file buffer
+    const sha256 = crypto.createHash('sha256').update(file.buffer).digest('hex');
+
+    // Upload file buffer to Supabase storage bucket 'articles'
+    const filePath = `articles/${Date.now()}_${file.originalname}`;
     const { data: storageData, error: storageError } = await supabase.storage
       .from('articles')
-      .upload(filePath, req.file.buffer, {
-        contentType: req.file.mimetype,
+      .upload(filePath, file.buffer, {
+        contentType: file.mimetype,
       });
 
     if (storageError) throw storageError;
 
-    // Save metadata in the table
+    // Save metadata in the articles table
     const { data, error } = await supabase.from('articles').insert([
       {
         title,
         authors,
         original_link,
-        bibliography,
+        bibliography: Array.isArray(bibliography) ? bibliography : [bibliography],
         file_url: storageData?.path || filePath,
+        sha256,
       },
     ]);
 
@@ -65,9 +70,7 @@ app.get('/article', async (req, res) => {
   try {
     const { id } = req.query;
 
-    if (!id) {
-      return res.status(400).json({ error: 'Missing id parameter' });
-    }
+    if (!id) return res.status(400).json({ error: 'Missing id parameter' });
 
     const { data, error } = await supabase
       .from('articles')
@@ -80,9 +83,7 @@ app.get('/article', async (req, res) => {
       return res.status(500).json({ error: 'Failed to fetch article' });
     }
 
-    if (!data) {
-      return res.status(404).json({ error: 'Article not found' });
-    }
+    if (!data) return res.status(404).json({ error: 'Article not found' });
 
     res.json(data);
   } catch (err) {
@@ -113,33 +114,22 @@ app.get('/articles/:id/comments', async (req, res) => {
     res.status(500).json({ error: 'Server error' });
   }
 });
-// POST /add-comment
-// Body expected: { article_id, commenter_name, comment, citations_count, has_identifying_info }
+
+// ===== Add Comment =====
 app.post('/add-comment', async (req, res) => {
-  const {
-    article_id,
-    commenter_name,
-    comment,
-    citations_count = 0,
-    has_identifying_info = false,
-  } = req.body;
+  const { article_id, commenter_name, comment, citations_count = 0, has_identifying_info = false } = req.body;
 
   if (!article_id || !comment) {
     return res.status(400).json({ success: false, error: 'article_id and comment are required' });
   }
 
-  // normalize numbers/booleans
   const citations = Number(citations_count) || 0;
   const identifying = !!has_identifying_info;
 
-  // Points formula (MVP): 1 point per 100 chars, 2 points per citation, +5 for identifying info
-  let points = (comment.length || 0) / 100;
-  points += citations * 2;
-  if (identifying) points += 5;
+  let points = (comment.length || 0) / 100 + citations * 2 + (identifying ? 5 : 0);
   points = Number(points.toFixed(2));
 
   try {
-    // Insert comment and return inserted row
     const { data: insertedRows, error: insertError } = await supabase
       .from('comments')
       .insert([{
@@ -150,7 +140,7 @@ app.post('/add-comment', async (req, res) => {
         has_identifying_info: identifying,
         points
       }])
-      .select(); // return inserted row(s)
+      .select();
 
     if (insertError) {
       console.error('Supabase insert error:', insertError);
@@ -159,7 +149,7 @@ app.post('/add-comment', async (req, res) => {
 
     const inserted = Array.isArray(insertedRows) ? insertedRows[0] : insertedRows;
 
-    // Update article total points (if articles table has 'points' column)
+    // Update article total points
     try {
       const { data: artRow, error: artErr } = await supabase
         .from('articles')
@@ -177,8 +167,7 @@ app.post('/add-comment', async (req, res) => {
 
       if (updateErr) console.error('Error updating article points:', updateErr);
     } catch (e) {
-      console.error('Error fetching/updating article points (non-fatal):', e);
-      // proceed — comment inserted successfully even if points update failed
+      console.error('Non-fatal error updating article points:', e);
     }
 
     return res.json({ success: true, points, comment: inserted });
@@ -188,31 +177,7 @@ app.post('/add-comment', async (req, res) => {
   }
 });
 
-// ===== Comments =====
-app.post('/comment', async (req, res) => {
-  const { article_id, comment, citations_count = 0, has_identifying_info = false } = req.body;
-
-  if (!article_id || !comment) {
-    return res.status(400).json({ success: false, message: 'Article ID and comment required.' });
-  }
-
-  const points = comment.length / 10 + citations_count + (has_identifying_info ? 2 : 0);
-
-  try {
-    const { data, error } = await supabase
-      .from('comments')
-      .insert([{ article_id, comment, citations_count, has_identifying_info, points }])
-      .select();
-
-    if (error) throw error;
-    res.json({ success: true, points, comment: data[0] });
-  } catch (err) {
-    console.error('Supabase insert error:', err);
-    res.status(500).json({ success: false, error: 'Error saving comment.' });
-  }
-});
-
-// ===== Get Articles =====
+// ===== Get Articles List =====
 app.get('/articles', async (req, res) => {
   try {
     const { data, error } = await supabase.from('articles').select('*');
