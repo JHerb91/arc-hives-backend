@@ -3,6 +3,9 @@ import cors from 'cors';
 import bodyParser from 'body-parser';
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
+import multer from 'multer';
+const upload = multer({ storage: multer.memoryStorage() }); // keep files in memory
+
 
 const app = express();
 app.use(cors());
@@ -19,41 +22,44 @@ if (!supabaseUrl || !supabaseKey) {
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 // ===== Upload Article =====
-app.post('/upload', async (req, res) => {
-  const { title, content } = req.body;
-  if (!title || !content) {
-    return res.status(400).json({ success: false, message: 'Title and content required.' });
-  }
-
-  // Generate SHA-256 hash of content
-  const sha256 = crypto.createHash('sha256').update(content).digest('hex');
-
-  console.log('Upload request body:', { title, content, sha256 });
-
+app.post('/upload', upload.single('file'), async (req, res) => {
   try {
-    const { data, error } = await supabase
+    const { title, authors, original_link, bibliography } = req.body;
+
+    if (!req.file) {
+      return res.status(400).json({ error: 'File is required' });
+    }
+
+    // Upload file buffer to Supabase storage (bucket = "articles")
+    const filePath = `articles/${Date.now()}_${req.file.originalname}`;
+    const { data: storageData, error: storageError } = await supabase.storage
       .from('articles')
-      .insert([{ title, content, sha256 }])
-      .select(); // ensures data is returned
+      .upload(filePath, req.file.buffer, {
+        contentType: req.file.mimetype,
+      });
 
-    if (error) {
-      // handle duplicate
-      if (error.code === '23505') {
-        return res.json({ success: false, duplicate: true });
-      }
-      throw error;
-    }
+    if (storageError) throw storageError;
 
-    if (!data || !data[0]) {
-      return res.json({ success: false, message: 'No data returned from Supabase.' });
-    }
+    // Save metadata in the table
+    const { data, error } = await supabase.from('articles').insert([
+      {
+        title,
+        authors,
+        original_link,
+        bibliography,
+        file_url: storageData?.path || filePath,
+      },
+    ]);
 
-    res.json({ success: true, hash: sha256, article: data[0] });
+    if (error) throw error;
+
+    res.json({ success: true, article: data[0] });
   } catch (err) {
-    console.error('Supabase insert error:', err);
-    res.status(500).json({ success: false, error: 'Error uploading article.' });
+    console.error('Upload error:', err);
+    res.status(500).json({ error: 'Error uploading article.' });
   }
 });
+
 // ===== Fetch Single Article =====
 app.get('/article', async (req, res) => {
   try {
