@@ -50,7 +50,17 @@ app.post('/upload', upload.single('file'), async (req, res) => {
         contentType: file.mimetype,
       });
 
-    if (storageError) throw storageError;
+    if (storageError) {
+      console.error('Supabase storage upload error:', storageError);
+      return res.status(500).json({ error: 'Error uploading file to storage.' });
+    }
+
+    // Normalize bibliography to an array
+    const bibArray = Array.isArray(bibliography)
+      ? bibliography
+      : bibliography
+      ? [bibliography]
+      : [];
 
     // Save metadata in the articles table
     const { data, error } = await supabase.from('articles').insert([
@@ -58,14 +68,23 @@ app.post('/upload', upload.single('file'), async (req, res) => {
         title,
         authors,
         original_link,
-        bibliography: Array.isArray(bibliography) ? bibliography : [bibliography],
+        bibliography: bibArray,
         file_url: storageData?.path || filePath,
         sha256,
       },
     ]);
 
-    if (error) throw error;
+    // Defensive check: ensure insert returned data
+    if (error) {
+      console.error('Supabase insert error:', error);
+      return res.status(500).json({ error: 'Error saving article metadata.' });
+    }
+    if (!data || data.length === 0) {
+      console.error('Supabase insert returned empty data');
+      return res.status(500).json({ error: 'Failed to insert article into database.' });
+    }
 
+    // Success
     res.json({ success: true, article: data[0] });
   } catch (err) {
     console.error('Upload error:', err);
