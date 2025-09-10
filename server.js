@@ -39,40 +39,39 @@ app.post('/upload', upload.single('file'), async (req, res) => {
       return res.status(400).json({ error: 'Title and file are required' });
     }
 
-    // Generate SHA-256 hash of file buffer
     const sha256 = crypto.createHash('sha256').update(file.buffer).digest('hex');
 
-    // Upload file buffer to Supabase storage bucket 'articles'
     const filePath = `articles/${Date.now()}_${file.originalname}`;
     const { data: storageData, error: storageError } = await supabase.storage
       .from('articles')
-      .upload(filePath, file.buffer, {
-        contentType: file.mimetype,
-      });
+      .upload(filePath, file.buffer, { contentType: file.mimetype });
 
-    if (storageError) {
-      console.error('Supabase storage upload error:', storageError);
-      return res.status(500).json({ error: 'Error uploading file to storage.' });
+    if (storageError) throw storageError;
+
+    // Ensure bibliography is always an array
+    const bibArray = Array.isArray(bibliography) ? bibliography : [bibliography];
+
+    const { data, error } = await supabase.from('articles').insert([{
+      title,
+      authors,
+      original_link,
+      bibliography: bibArray,
+      file_url: storageData?.path || filePath,
+      sha256,
+    }]).select(); // <-- ensure inserted row is returned
+
+    if (error) throw error;
+
+    if (!data || !data[0]) {
+      return res.status(500).json({ error: 'Insert succeeded but no data returned' });
     }
 
-    // Normalize bibliography to an array
-    const bibArray = Array.isArray(bibliography)
-      ? bibliography
-      : bibliography
-      ? [bibliography]
-      : [];
-
-    // Save metadata in the articles table
-    const { data, error } = await supabase.from('articles').insert([
-      {
-        title,
-        authors,
-        original_link,
-        bibliography: bibArray,
-        file_url: storageData?.path || filePath,
-        sha256,
-      },
-    ]);
+    res.json({ success: true, article: data[0] });
+  } catch (err) {
+    console.error('Upload error:', err);
+    res.status(500).json({ error: err.message || 'Error uploading article.' });
+  }
+});
 
     // Defensive check: ensure insert returned data
     if (error) {
