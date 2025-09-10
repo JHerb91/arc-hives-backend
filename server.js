@@ -8,7 +8,15 @@ import multer from 'multer';
 const upload = multer({ storage: multer.memoryStorage() }); // keep files in memory
 
 const app = express();
-app.use(cors());
+app.use(cors({
+  origin: [
+    'https://arc-hives-frontend.vercel.app',
+    'http://localhost:3000' // for local testing
+  ],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
+
 app.use(bodyParser.json());
 
 // --- Supabase setup ---
