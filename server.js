@@ -36,10 +36,11 @@ app.post('/upload', upload.single('file'), async (req, res) => {
     const file = req.file;
 
     if (!title || !file) {
+      // ✅ This return is inside the route function
       return res.status(400).json({ error: 'Title and file are required' });
     }
 
-    // Parse bibliography if it was sent as a JSON string
+    // Parse bibliography if sent as JSON string
     let parsedBibliography;
     try {
       parsedBibliography =
@@ -51,10 +52,10 @@ app.post('/upload', upload.single('file'), async (req, res) => {
       parsedBibliography = [];
     }
 
-    // Generate SHA-256 hash of file buffer
+    // Generate SHA-256 hash
     const sha256 = crypto.createHash('sha256').update(file.buffer).digest('hex');
 
-    // Upload file buffer to Supabase storage bucket 'articles'
+    // Upload file to Supabase storage
     const filePath = `articles/${Date.now()}_${file.originalname}`;
     const { data: storageData, error: storageError } = await supabase.storage
       .from('articles')
@@ -64,17 +65,20 @@ app.post('/upload', upload.single('file'), async (req, res) => {
 
     if (storageError) throw storageError;
 
-    // Save metadata in the articles table
-    const { data, error } = await supabase.from('articles').insert([
-      {
-        title,
-        authors,
-        original_link,
-        bibliography: parsedBibliography,
-        file_url: storageData?.path || filePath,
-        sha256,
-      },
-    ]).select();
+    // Save metadata in Supabase
+    const { data, error } = await supabase
+      .from('articles')
+      .insert([
+        {
+          title,
+          authors,
+          original_link,
+          bibliography: parsedBibliography,
+          file_url: storageData?.path || filePath,
+          sha256,
+        },
+      ])
+      .select();
 
     if (error) throw error;
 
