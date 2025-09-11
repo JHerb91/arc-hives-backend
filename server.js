@@ -36,7 +36,6 @@ app.post('/upload', upload.single('file'), async (req, res) => {
     const file = req.file;
 
     if (!title || !file) {
-      // ✅ This return is inside the route function
       return res.status(400).json({ error: 'Title and file are required' });
     }
 
@@ -51,6 +50,43 @@ app.post('/upload', upload.single('file'), async (req, res) => {
       console.error('Error parsing bibliography JSON:', err);
       parsedBibliography = [];
     }
+
+    // Generate SHA-256 hash of file buffer
+    const sha256 = crypto.createHash('sha256').update(file.buffer).digest('hex');
+
+    // Upload file buffer to Supabase storage bucket 'articles'
+    const filePath = `articles/${Date.now()}_${file.originalname}`;
+    const { data: storageData, error: storageError } = await supabase.storage
+      .from('articles')
+      .upload(filePath, file.buffer, {
+        contentType: file.mimetype,
+      });
+
+    if (storageError) throw storageError;
+
+    // Construct the full public URL for the uploaded file
+    const filePublicUrl = `https://ebghnxurosvklsdoryfg.supabase.co/storage/v1/object/public/${filePath}`;
+
+    // Save metadata in the articles table
+    const { data, error } = await supabase.from('articles').insert([
+      {
+        title,
+        authors,
+        original_link,
+        bibliography: Array.isArray(parsedBibliography) ? parsedBibliography : [parsedBibliography],
+        file_url: filePublicUrl, // <-- store full URL here
+        sha256,
+      },
+    ]);
+
+    if (error) throw error;
+
+    res.json({ success: true, article: data[0] });
+  } catch (err) {
+    console.error('Upload error:', err);
+    res.status(500).json({ error: 'Error uploading article.' });
+  }
+});
 
     // Generate SHA-256 hash
     const sha256 = crypto.createHash('sha256').update(file.buffer).digest('hex');
