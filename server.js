@@ -86,7 +86,21 @@ app.post('/upload', upload.single('file'), async (req, res) => {
 
     if (error) throw error;
 
-    res.json({ success: true, article: data[0] });
+    // Return only safe fields to frontend (exclude sensitive data like sha256)
+    const safeArticle = {
+      id: data[0].id,
+      title: data[0].title,
+      authors: data[0].authors,
+      original_link: data[0].original_link,
+      bibliography: data[0].bibliography,
+      file_url: data[0].file_url,
+      points: data[0].points,
+      created_at: data[0].created_at,
+      certificate_id: data[0].certificate_id,
+      content: data[0].content
+    };
+
+    res.json({ success: true, article: safeArticle });
   } catch (err) {
     console.error('Upload error:', err);
     res.status(500).json({ error: 'Error uploading article.' });
@@ -102,7 +116,7 @@ app.get('/article', async (req, res) => {
 
     const { data, error } = await supabase
       .from('articles')
-      .select('*')
+      .select('id, title, authors, original_link, bibliography, file_url, points, created_at, certificate_id, content')
       .eq('id', id)
       .single();
 
@@ -216,7 +230,10 @@ app.post('/add-comment', async (req, res) => {
 // ===== Get Articles List =====
 app.get('/articles', async (req, res) => {
   try {
-    const { data, error } = await supabase.from('articles').select('*');
+    const { data, error } = await supabase
+      .from('articles')
+      .select('id, title, authors, original_link, bibliography, file_url, points, created_at, certificate_id, content');
+    
     if (error) throw error;
     
     // Fix incomplete file URLs for all articles
