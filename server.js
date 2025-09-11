@@ -39,51 +39,45 @@ app.post('/upload', upload.single('file'), async (req, res) => {
       return res.status(400).json({ error: 'Title and file are required' });
     }
 
+    // Parse bibliography if it was sent as a JSON string
+    let parsedBibliography;
+    try {
+      parsedBibliography =
+        typeof bibliography === 'string'
+          ? JSON.parse(bibliography)
+          : bibliography;
+    } catch (err) {
+      console.error('Error parsing bibliography JSON:', err);
+      parsedBibliography = [];
+    }
+
+    // Generate SHA-256 hash of file buffer
     const sha256 = crypto.createHash('sha256').update(file.buffer).digest('hex');
 
+    // Upload file buffer to Supabase storage bucket 'articles'
     const filePath = `articles/${Date.now()}_${file.originalname}`;
     const { data: storageData, error: storageError } = await supabase.storage
       .from('articles')
-      .upload(filePath, file.buffer, { contentType: file.mimetype });
+      .upload(filePath, file.buffer, {
+        contentType: file.mimetype,
+      });
 
     if (storageError) throw storageError;
 
-    // Ensure bibliography is always an array
-    const bibArray = Array.isArray(bibliography) ? bibliography : [bibliography];
-
-    const { data, error } = await supabase.from('articles').insert([{
-      title,
-      authors,
-      original_link,
-      bibliography: bibArray,
-      file_url: storageData?.path || filePath,
-      sha256,
-    }]).select(); // <-- ensure inserted row is returned
+    // Save metadata in the articles table
+    const { data, error } = await supabase.from('articles').insert([
+      {
+        title,
+        authors,
+        original_link,
+        bibliography: parsedBibliography,
+        file_url: storageData?.path || filePath,
+        sha256,
+      },
+    ]).select();
 
     if (error) throw error;
 
-    if (!data || !data[0]) {
-      return res.status(500).json({ error: 'Insert succeeded but no data returned' });
-    }
-
-    res.json({ success: true, article: data[0] });
-  } catch (err) {
-    console.error('Upload error:', err);
-    res.status(500).json({ error: err.message || 'Error uploading article.' });
-  }
-});
-
-    // Defensive check: ensure insert returned data
-    if (error) {
-      console.error('Supabase insert error:', error);
-      return res.status(500).json({ error: 'Error saving article metadata.' });
-    }
-    if (!data || data.length === 0) {
-      console.error('Supabase insert returned empty data');
-      return res.status(500).json({ error: 'Failed to insert article into database.' });
-    }
-
-    // Success
     res.json({ success: true, article: data[0] });
   } catch (err) {
     console.error('Upload error:', err);
