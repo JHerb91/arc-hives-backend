@@ -1,3 +1,4 @@
+
 import express from 'express';
 import cors from 'cors';
 import bodyParser from 'body-parser';
@@ -64,8 +65,12 @@ app.post('/upload', upload.single('file'), async (req, res) => {
 
     if (storageError) throw storageError;
 
-    // Construct the full public URL for the uploaded file
-    const filePublicUrl = `https://ebghnxurosvklsdoryfg.supabase.co/storage/v1/object/public/${filePath}`;
+    // Get the public URL for the uploaded file
+    const { data: publicUrlData } = supabase.storage
+      .from('articles')
+      .getPublicUrl(filePath);
+    
+    const filePublicUrl = publicUrlData.publicUrl;
 
     // Save metadata in the articles table
     const { data, error } = await supabase.from('articles').insert([
@@ -107,6 +112,14 @@ app.get('/article', async (req, res) => {
     }
 
     if (!data) return res.status(404).json({ error: 'Article not found' });
+
+    // Fix incomplete file URLs (for articles uploaded before the URL fix)
+    if (data.file_url && !data.file_url.startsWith('http')) {
+      const { data: publicUrlData } = supabase.storage
+        .from('articles')
+        .getPublicUrl(data.file_url);
+      data.file_url = publicUrlData.publicUrl;
+    }
 
     res.json(data);
   } catch (err) {
@@ -205,7 +218,19 @@ app.get('/articles', async (req, res) => {
   try {
     const { data, error } = await supabase.from('articles').select('*');
     if (error) throw error;
-    res.json({ success: true, articles: data });
+    
+    // Fix incomplete file URLs for all articles
+    const articlesWithFixedUrls = data.map(article => {
+      if (article.file_url && !article.file_url.startsWith('http')) {
+        const { data: publicUrlData } = supabase.storage
+          .from('articles')
+          .getPublicUrl(article.file_url);
+        article.file_url = publicUrlData.publicUrl;
+      }
+      return article;
+    });
+    
+    res.json({ success: true, articles: articlesWithFixedUrls });
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, error: 'Error fetching articles.' });
