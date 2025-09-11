@@ -88,43 +88,6 @@ app.post('/upload', upload.single('file'), async (req, res) => {
   }
 });
 
-    // Generate SHA-256 hash
-    const sha256 = crypto.createHash('sha256').update(file.buffer).digest('hex');
-
-    // Upload file to Supabase storage
-    const filePath = `articles/${Date.now()}_${file.originalname}`;
-    const { data: storageData, error: storageError } = await supabase.storage
-      .from('articles')
-      .upload(filePath, file.buffer, {
-        contentType: file.mimetype,
-      });
-
-    if (storageError) throw storageError;
-
-    // Save metadata in Supabase
-    const { data, error } = await supabase
-      .from('articles')
-      .insert([
-        {
-          title,
-          authors,
-          original_link,
-          bibliography: parsedBibliography,
-          file_url: publicURL,
-          sha256,
-        },
-      ])
-      .select();
-
-    if (error) throw error;
-
-    res.json({ success: true, article: data[0] });
-  } catch (err) {
-    console.error('Upload error:', err);
-    res.status(500).json({ error: 'Error uploading article.' });
-  }
-});
-
 // ===== Fetch Single Article =====
 app.get('/article', async (req, res) => {
   try {
