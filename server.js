@@ -74,7 +74,7 @@ app.post('/upload', upload.single('file'), async (req, res) => {
           authors,
           original_link,
           bibliography: parsedBibliography,
-          file_url: storageData?.path || filePath,
+          file_url: publicURL,
           sha256,
         },
       ])
