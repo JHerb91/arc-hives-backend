@@ -166,29 +166,41 @@ app.get('/articles/:id/comments', async (req, res) => {
 
 // ===== Add Comment =====
 app.post('/add-comment', async (req, res) => {
-  const { article_id, commenter_name, comment, citations_count = 0, has_identifying_info = false, member_id, spend_points, spend_direction } = req.body;
+  const { article_id, commenter_name, comment, citations = [], has_identifying_info = false, member_id, spend_points, spend_direction } = req.body;
 
   if (!article_id || !comment) {
     return res.status(400).json({ success: false, error: 'article_id and comment are required' });
   }
 
-  const citations = Number(citations_count) || 0;
+  // Process citations - ensure it's an array of strings
+  const citationsArray = Array.isArray(citations) ? citations.filter(c => c && c.trim()) : [];
+  const citationsCount = citationsArray.length;
   const identifying = !!has_identifying_info;
 
-  // Optional spend validation (anonymous allowed)
+  // Calculate comment points
+  let commentPoints = (comment.length || 0) / 100 + citationsCount * 2 + (identifying ? 5 : 0);
+  commentPoints = Number(commentPoints.toFixed(2));
+
+  // Auto-calculate spend points if not provided (use comment points as default)
   let spendAmount = 0;
   let spendSign = 0; // +1 for up, -1 for down, 0 for none
   let memberRow = null;
+  
   if (spend_points != null || spend_direction != null || member_id != null) {
     const parsedSpend = Number(spend_points);
     const dir = String(spend_direction || '').toLowerCase();
-    if (!Number.isFinite(parsedSpend) || parsedSpend <= 0) {
+    
+    // If spend_points not provided, use comment points
+    const finalSpendAmount = Number.isFinite(parsedSpend) && parsedSpend > 0 ? parsedSpend : commentPoints;
+    
+    if (finalSpendAmount <= 0) {
       return res.status(400).json({ success: false, error: 'spend_points must be a positive number' });
     }
     if (dir !== 'up' && dir !== 'down') {
       return res.status(400).json({ success: false, error: "spend_direction must be 'up' or 'down'" });
     }
-    spendAmount = parsedSpend;
+    
+    spendAmount = finalSpendAmount;
     spendSign = dir === 'down' ? -1 : 1;
 
     // If a member_id is provided, validate and deduct; otherwise allow anonymous spend with no deduction
@@ -208,9 +220,6 @@ app.post('/add-comment', async (req, res) => {
     }
   }
 
-  let points = (comment.length || 0) / 100 + citations * 2 + (identifying ? 5 : 0);
-  points = Number(points.toFixed(2));
-
   try {
     const { data: insertedRows, error: insertError } = await supabase
       .from('comments')
@@ -218,9 +227,10 @@ app.post('/add-comment', async (req, res) => {
         article_id,
         commenter_name: commenter_name || 'Anonymous',
         comment,
-        citations_count: citations,
+        citations: citationsArray,
+        citations_count: citationsCount,
         has_identifying_info: identifying,
-        points
+        points: commentPoints
       }])
       .select();
 
@@ -241,7 +251,7 @@ app.post('/add-comment', async (req, res) => {
 
       const currentPoints = artRow && typeof artRow.points === 'number' ? artRow.points : 0;
       const spendAdjustment = spendSign !== 0 ? spendSign * spendAmount : 0;
-      const newPoints = Number((currentPoints + points + spendAdjustment).toFixed(2));
+      const newPoints = Number((currentPoints + commentPoints + spendAdjustment).toFixed(2));
 
       const { error: updateErr } = await supabase
         .from('articles')
@@ -265,7 +275,13 @@ app.post('/add-comment', async (req, res) => {
       console.error('Non-fatal error updating article points:', e);
     }
 
-    return res.json({ success: true, points, spend_applied: spendSign !== 0 ? spendSign * spendAmount : 0, comment: inserted });
+    return res.json({ 
+      success: true, 
+      points: commentPoints, 
+      spend_applied: spendSign !== 0 ? spendSign * spendAmount : 0, 
+      comment: inserted,
+      calculated_points: commentPoints
+    });
   } catch (err) {
     console.error('Server error in /add-comment:', err);
     return res.status(500).json({ success: false, error: 'Server error adding comment' });
