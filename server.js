@@ -56,10 +56,11 @@ app.post('/upload', upload.single('file'), async (req, res) => {
     const sha256 = crypto.createHash('sha256').update(file.buffer).digest('hex');
 
     // Upload file buffer to Supabase storage bucket 'articles'
-    const filePath = `articles/${Date.now()}_${file.originalname}`;
+    // IMPORTANT: Do not prefix the key with the bucket name
+    const fileKey = `${Date.now()}_${file.originalname}`;
     const { data: storageData, error: storageError } = await supabase.storage
       .from('articles')
-      .upload(filePath, file.buffer, {
+      .upload(fileKey, file.buffer, {
         contentType: file.mimetype,
       });
 
@@ -68,7 +69,7 @@ app.post('/upload', upload.single('file'), async (req, res) => {
     // Get the public URL for the uploaded file
     const { data: publicUrlData } = supabase.storage
       .from('articles')
-      .getPublicUrl(filePath);
+      .getPublicUrl(fileKey);
     
     const filePublicUrl = publicUrlData.publicUrl;
 
@@ -126,12 +127,17 @@ app.get('/article', async (req, res) => {
 
     if (!data) return res.status(404).json({ error: 'Article not found' });
 
-    // Fix incomplete file URLs (for articles uploaded before the URL fix)
-    if (data.file_url && !data.file_url.startsWith('http')) {
-      const { data: publicUrlData } = supabase.storage
-        .from('articles')
-        .getPublicUrl(data.file_url);
-      data.file_url = publicUrlData.publicUrl;
+    // Fix file URLs
+    if (data.file_url) {
+      // For legacy rows that stored only the object key
+      if (!data.file_url.startsWith('http')) {
+        const { data: publicUrlData } = supabase.storage
+          .from('articles')
+          .getPublicUrl(data.file_url.replace(/^articles\//, ''));
+        data.file_url = publicUrlData.publicUrl;
+      }
+      // Normalize accidental double bucket segment
+      data.file_url = data.file_url.replace('/public/articles/articles/', '/public/articles/');
     }
 
     res.json(data);
@@ -235,13 +241,16 @@ app.get('/articles', async (req, res) => {
     
     if (error) throw error;
     
-    // Fix incomplete file URLs for all articles
+    // Fix file URLs for all articles
     const articlesWithFixedUrls = data.map(article => {
-      if (article.file_url && !article.file_url.startsWith('http')) {
-        const { data: publicUrlData } = supabase.storage
-          .from('articles')
-          .getPublicUrl(article.file_url);
-        article.file_url = publicUrlData.publicUrl;
+      if (article.file_url) {
+        if (!article.file_url.startsWith('http')) {
+          const { data: publicUrlData } = supabase.storage
+            .from('articles')
+            .getPublicUrl(article.file_url.replace(/^articles\//, ''));
+          article.file_url = publicUrlData.publicUrl;
+        }
+        article.file_url = article.file_url.replace('/public/articles/articles/', '/public/articles/');
       }
       return article;
     });
