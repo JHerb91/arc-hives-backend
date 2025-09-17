@@ -166,7 +166,7 @@ app.get('/articles/:id/comments', async (req, res) => {
 
 // ===== Add Comment =====
 app.post('/add-comment', async (req, res) => {
-  const { article_id, commenter_name, comment, citations_count = 0, has_identifying_info = false } = req.body;
+  const { article_id, commenter_name, comment, citations_count = 0, has_identifying_info = false, member_id, spend_points, spend_direction } = req.body;
 
   if (!article_id || !comment) {
     return res.status(400).json({ success: false, error: 'article_id and comment are required' });
@@ -174,6 +174,41 @@ app.post('/add-comment', async (req, res) => {
 
   const citations = Number(citations_count) || 0;
   const identifying = !!has_identifying_info;
+
+  // Optional spend validation
+  let spendAmount = 0;
+  let spendSign = 0; // +1 for up, -1 for down, 0 for none
+  let memberRow = null;
+  if (member_id != null || spend_points != null || spend_direction != null) {
+    // If any spend-related field is provided, require all
+    if (!member_id || spend_points == null || !spend_direction) {
+      return res.status(400).json({ success: false, error: 'member_id, spend_points, and spend_direction are all required when spending points' });
+    }
+    const parsedSpend = Number(spend_points);
+    if (!Number.isFinite(parsedSpend) || parsedSpend <= 0) {
+      return res.status(400).json({ success: false, error: 'spend_points must be a positive number' });
+    }
+    const dir = String(spend_direction).toLowerCase();
+    if (dir !== 'up' && dir !== 'down') {
+      return res.status(400).json({ success: false, error: "spend_direction must be 'up' or 'down'" });
+    }
+    spendAmount = parsedSpend;
+    spendSign = dir === 'down' ? -1 : 1;
+
+    // Fetch member to verify balance
+    const { data: mData, error: memberErr } = await supabase
+      .from('members')
+      .select('id, points')
+      .eq('id', member_id)
+      .single();
+    if (memberErr || !mData) {
+      return res.status(400).json({ success: false, error: 'Member not found' });
+    }
+    if (!Number.isFinite(mData.points) || mData.points < spendAmount) {
+      return res.status(400).json({ success: false, error: 'Insufficient member points' });
+    }
+    memberRow = mData;
+  }
 
   let points = (comment.length || 0) / 100 + citations * 2 + (identifying ? 5 : 0);
   points = Number(points.toFixed(2));
@@ -198,7 +233,7 @@ app.post('/add-comment', async (req, res) => {
 
     const inserted = Array.isArray(insertedRows) ? insertedRows[0] : insertedRows;
 
-    // Update article total points
+    // Update article total points (include optional spend adjustment)
     try {
       const { data: artRow, error: artErr } = await supabase
         .from('articles')
@@ -207,7 +242,8 @@ app.post('/add-comment', async (req, res) => {
         .single();
 
       const currentPoints = artRow && typeof artRow.points === 'number' ? artRow.points : 0;
-      const newPoints = Number((currentPoints + points).toFixed(2));
+      const spendAdjustment = spendSign !== 0 ? spendSign * spendAmount : 0;
+      const newPoints = Number((currentPoints + points + spendAdjustment).toFixed(2));
 
       const { error: updateErr } = await supabase
         .from('articles')
@@ -215,11 +251,23 @@ app.post('/add-comment', async (req, res) => {
         .eq('id', article_id);
 
       if (updateErr) console.error('Error updating article points:', updateErr);
+
+      // Deduct spent points from member if applicable
+      if (spendSign !== 0 && memberRow) {
+        const newMemberPoints = Math.max(0, Number((memberRow.points - spendAmount).toFixed(2)));
+        const { error: memberUpdateErr } = await supabase
+          .from('members')
+          .update({ points: newMemberPoints })
+          .eq('id', memberRow.id);
+        if (memberUpdateErr) {
+          console.error('Error deducting member points:', memberUpdateErr);
+        }
+      }
     } catch (e) {
       console.error('Non-fatal error updating article points:', e);
     }
 
-    return res.json({ success: true, points, comment: inserted });
+    return res.json({ success: true, points, spend_applied: spendSign !== 0 ? spendSign * spendAmount : 0, comment: inserted });
   } catch (err) {
     console.error('Server error in /add-comment:', err);
     return res.status(500).json({ success: false, error: 'Server error adding comment' });
