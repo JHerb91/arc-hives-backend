@@ -96,7 +96,6 @@ app.post('/upload', upload.single('file'), async (req, res) => {
       file_url: data[0].file_url,
       points: data[0].points,
       created_at: data[0].created_at,
-      certificate_id: data[0].certificate_id,
       content: data[0].content
     };
 
@@ -116,7 +115,7 @@ app.get('/article', async (req, res) => {
 
     const { data, error } = await supabase
       .from('articles')
-      .select('id, title, authors, original_link, bibliography, file_url, points, created_at, certificate_id, content')
+      .select('id, title, authors, original_link, bibliography, file_url, points, created_at, content')
       .eq('id', id)
       .single();
 
@@ -232,7 +231,7 @@ app.get('/articles', async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('articles')
-      .select('id, title, authors, original_link, bibliography, file_url, points, created_at, certificate_id, content');
+      .select('id, title, authors, original_link, bibliography, file_url, points, created_at, content');
     
     if (error) throw error;
     
