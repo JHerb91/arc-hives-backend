@@ -166,7 +166,7 @@ app.get('/articles/:id/comments', async (req, res) => {
 
 // ===== Add Comment =====
 app.post('/add-comment', async (req, res) => {
-  const { article_id, commenter_name, comment, citations = [], has_identifying_info = false, member_id, spend_points, spend_direction } = req.body;
+  const { article_id, commenter_name, comment, citations = [], has_identifying_info = false, identifying_name, identifying_title, identifying_organization, member_id, spend_points, spend_direction } = req.body;
 
   if (!article_id || !comment) {
     return res.status(400).json({ success: false, error: 'article_id and comment are required' });
@@ -230,6 +230,9 @@ app.post('/add-comment', async (req, res) => {
         citations: citationsArray,
         citations_count: citationsCount,
         has_identifying_info: identifying,
+        identifying_name: identifying ? (identifying_name || null) : null,
+        identifying_title: identifying ? (identifying_title || null) : null,
+        identifying_organization: identifying ? (identifying_organization || null) : null,
         points: commentPoints
       }])
       .select();
